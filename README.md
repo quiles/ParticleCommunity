@@ -4,6 +4,7 @@ Instructions to compile:
 
    1) Download the SNAP/C++ package: https://snap.stanford.edu/releases/Snap-2.4.zip
           [https://snap.stanford.edu] 
+
    2) Download the source code: https://github.com/quiles/ParticleCommunity/archive/master.zip
 
    3) Copy the folder into the subfolder ./examples of the Snap package.

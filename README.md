@@ -26,7 +26,7 @@ Instructions to run:
          $ ./Particle filename.dat -b 0.1 -tr 0.1 -v
          This command will run the Particle Model with beta=0.1, \theta_R=0.1 (stop condition), and in verbose mode       
 
-    to help, type $ ./Particle
+    Help: type $ ./Particle
 
 
 2) Run for several values of beta

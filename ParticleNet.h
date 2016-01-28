@@ -13,8 +13,20 @@
 #include <vector>
 #include "Snap.h"
 
+#undef min
+#undef max
 
 using namespace std;
+
+class TCentroid{
+public:
+    float x, y, z;
+    float error;
+    int nparticles; // store the number of associated particles
+    int comm_id;
+    float totalR; // sum of the repulsion inside the cluster
+    float totalA; // sum of the attraction inside the cluster
+};
 
 class TParticle{
 public:
@@ -25,16 +37,10 @@ public:
 	float dxA, dyA, dzA;
 	float dxR, dyR, dzR;
 //	float erro;
-	int index; // community id obtained by the algorithm
+    int cluster_id;
+	TCentroid *index; // community id obtained by the algorithm / pointer to the centroid
 	int indexReal; // real community id
-};
-
-class TCentroid{
-public:
-    float x, y, z;
-    float error;
-    int nparticles; // store the number of associated particles
-    int comm_id;
+    vector <int> indexRealH; // real community id
 };
 
 
@@ -44,26 +50,43 @@ private:
     vector <TCentroid> Centroids;
     vector <TParticle> Particles;
 
+    
     float alpha; // attraction strength
     float beta; // repulsion strength
     float gamma; // repulsion decai, constant at 1.0
     float eta; // numerical integration step (delta T), constant at 1.0
     float addCentroidThreshold;
     float mergeCentroidThreshold;
+    int centroidTransient;
     
     int nextComId;
+    int numCommunities;
+    vector<int> numCommunitiesH;
+    int numClusters;
+    
 
     bool toAddCentroid; // flag to add a new centroid
     bool toRemoveCentroid; // flag to remove a centroid
     int centroid2remove;
     int idCentroidMaxError; // store the id of the centroid with the largest error
-
+    float accError;
+    int transient;
+    float RR, oldRR, oldRR2;
+    
+    
     void assignCentroids();
     void computeCentroids();
     void removeCentroid();
     void addCentroid();
+    void mergeCentroids();
+    void fineTuning(int t);
+    bool ExpandCluster(TParticle *p, int clusterID);
+    vector<TParticle*> GetRegion(TParticle *p);
+    void ShrinkCentroids();
+
     
 public:
+
 
     TParticleNet(const char *filename);
     ~TParticleNet();
@@ -71,24 +94,40 @@ public:
     // format: 1 -> LFR files
     //         2 -> SNAP files
     void LoadCommunities(const char *filename, int format);
+    void LoadCommunitiesH(const char *filename, int nivel);
 
     PUNGraph GetNetwork(){
         return Network;
     };
     void SetModelParameters(float a, float b, float g){
-        alpha=a; beta=b; gamma=g; eta=1.0;
+        alpha=a; beta=b; gamma=g; eta=1.0; transient = 0;
     };
     void SetDetectionParameters(float a, float m){
         addCentroidThreshold=a; mergeCentroidThreshold=m;
     };
     
-    void RunByStep();
-    int RunModel();
+    void RunByStep(bool detect);
+    int RunModel(int maxIT, float minDR, bool verbose);
     
     void SaveParticlePosition(const char *filename);
     void CommunityDetection();
+    void CommunityDetection_DEBUG();
     void SaveCommunities(const char *filename);
+    void SaveCentroids(const char *filename);
     float NMI();
+    float NMI2();
+    float NMIH(int nivel);
+    void ResetParticles();
+    int getNumCommunities();
+    int getNumParticles();
+    void printCentroids();
+    float printCentroidsError();
+    
+    void CommunityDetection2(); // DBScan Algorithm
+    int CommunityDetection3();
+    
+
+
     
 //	int iteracao;
 //	int stepAddCentroid; // define o momento de inser��o de novos centroids

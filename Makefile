@@ -8,8 +8,10 @@
 
 include ../../Makefile.config
 
-MAIN = main
+MAIN = Particle
 DEPH = ParticleNet.h
 DEPCPP = ParticleNet.cpp
 
 include ../Makefile.exmain
+
+

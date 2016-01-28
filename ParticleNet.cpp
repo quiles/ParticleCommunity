@@ -15,6 +15,8 @@
 #include <sstream>
 //#include <stdio.h>
 #include <iomanip>
+#include <algorithm>
+
 
 
 TParticleNet::TParticleNet(const char *filename){
@@ -23,28 +25,70 @@ TParticleNet::TParticleNet(const char *filename){
     
     Network = TSnap::LoadEdgeList<PUNGraph>(filename,0,1);
     
+    centroid.x = 0.0;
+    centroid.y = 0.0;
+    centroid.z = 0.0;
+    centroidTransient = 0;
+    addCentroidThreshold = 0.5;
+    centroid.comm_id = 1;
+    numCommunities = 1;
+    nextComId = 2; // id of the next detected community (used to identify the centroids/communities);
+    Centroids.push_back(centroid);
+    
+    oldRR2 = 0.0;
+    oldRR = 0.0;
+    RR = 0.0;
+    
+    numClusters = 0;
+
     for (TUNGraph::TNodeI NI = Network->BegNI(); NI < Network->EndNI(); NI++) {
         particle.x = (float)(rand()%2000 - 1000) / 10000.0;
         particle.y = (float)(rand()%2000 - 1000) / 10000.0;
         particle.z = (float)(rand()%2000 - 1000) / 10000.0;
-        particle.index = 0;
+        particle.index = NULL;
+        particle.indexReal = 0;
+        particle.node_id = NI.GetId();
+        particle.node = NI;
+        particle.degree = NI.GetDeg();
+        particle.cluster_id = 0;
+        Particles.push_back(particle);
+    }
+
+}
+
+TParticleNet::~TParticleNet() {
+}
+
+void TParticleNet::ResetParticles() {
+    TCentroid centroid;
+    TParticle particle;
+
+    Particles.clear();
+    Centroids.clear();
+    
+    transient = 0;
+    
+    for (TUNGraph::TNodeI NI = Network->BegNI(); NI < Network->EndNI(); NI++) {
+        particle.x = (float)(rand()%2000 - 1000) / 10000.0;
+        particle.y = (float)(rand()%2000 - 1000) / 10000.0;
+        particle.z = (float)(rand()%2000 - 1000) / 10000.0;
+        particle.index = NULL;
         particle.indexReal = 0;
         particle.node_id = NI.GetId();
         particle.node = NI;
         particle.degree = NI.GetDeg();
         Particles.push_back(particle);
     }
-
-	centroid.x = 0.0;
-	centroid.y = 0.0;
+    
+    centroid.x = 0.0;
+    centroid.y = 0.0;
     centroid.z = 0.0;
-	centroid.comm_id = 1;
+    centroid.comm_id = 1;
     nextComId = 2; // id of the next detected community (used to identify the centroids/communities);
-	Centroids.push_back(centroid);
+    Centroids.push_back(centroid);
+    
 }
 
-TParticleNet::~TParticleNet() {
-}
 
 void TParticleNet::LoadCommunities(const char *filename, int format){
     ifstream file;
@@ -53,6 +97,8 @@ void TParticleNet::LoadCommunities(const char *filename, int format){
     int node_id;
     int com;
     vector<TParticle>::iterator it;
+    
+    numCommunities = 0;
     
     file.open(filename, ifstream::in);
     
@@ -64,6 +110,7 @@ void TParticleNet::LoadCommunities(const char *filename, int format){
 //                cout << node_id << " - " << com << endl;
                 it->indexReal = com;
                 teste++;
+                if (com > numCommunities) numCommunities = com;
             }
         }; break;
         case 2: { // SNAP
@@ -76,19 +123,66 @@ void TParticleNet::LoadCommunities(const char *filename, int format){
                     }
 //                    cout << node_id << " - " << it->node_id << endl;
                     it->indexReal = com;
+                    if (com > numCommunities) numCommunities = com;
                 }
                 com++;
             }
         }; break;
     }
     
+//    for (it = Particles.begin() ; it != Particles.end() ; ++it) {
+////        cout << "Comunidade: " << *it->node_id << " #: " << *it->index->comm_id << endl;
+//        cout << " - " << it->indexReal;
+//    }
+//    cout << endl;
+    
     file.close();
 }
 
-void TParticleNet::RunByStep(){
+void TParticleNet::LoadCommunitiesH(const char *filename, int nivel){
+/*
+    ifstream file;
+    string loadName;
+    string line;
+    stringstream ss;
+    int node_id;
+    int com;
+    vector<TParticle>::iterator it;
+    char out[256];
+    int i, numCom;;
+    
+    for (i=0 ; i<nivel ; i++){
+        sprintf(out,"_n%d.dat",i+1);
+        loadName = filename;
+        loadName += out;
+//        cout << "Arquivo: " << loadName << endl;
+        file.open(loadName, ifstream::in);
+        numCom = 0;
+        while (file >> node_id && file >> com){
+            for (it = Particles.begin() ; it != Particles.end() && it->node_id != node_id ; ++it);
+//            cout << node_id << " - " << com << endl;
+            it->indexRealH.push_back(com);
+            if (com > numCom) numCom = com;
+        }
+        numCommunitiesH.push_back(numCom);
+        file.close();
+//        cout << "Num Com Lido: " << numCom << endl;
+    }
+    
+//    for (it = Particles.begin() ; it != Particles.end() ; ++it) {
+//        cout << it->node_id << " - " << it->indexRealH[0] << " : " << it->indexRealH[1] << endl;
+//    }
+//    cout << endl;
+*/
+}
+
+
+void TParticleNet::RunByStep(bool detect){
     float sumX, sumY, sumZ, r, dist;
     vector<TParticle>::iterator i,j;
     TUNGraph::TNodeI nodeIt;
+    
+    ++transient;
     
     for (i = Particles.begin() ; i != Particles.end(); ++i){
         i->dxA = 0.0;
@@ -102,11 +196,14 @@ void TParticleNet::RunByStep(){
     for (i = Particles.begin() ; i != Particles.end()-1; ++i){
         nodeIt = Network->GetNI(i->node_id);
         for (j = i+1 ; j != Particles.end(); ++j){
-//            if (i->node.IsNbrNId(j->node_id)) { // i and j are connected
+            r = pow(i->x - j->x,2) + pow(i->y - j->y,2) + pow(i->z - j->z,2);
+            r = sqrt(r);
+            if (r==0) r = 0.0001;
+
             if (nodeIt.IsNbrNId(j->node_id)) { // i and j are connected
-                sumX = alpha*(j->x - i->x);
-                sumY = alpha*(j->y - i->y);
-                sumZ = alpha*(j->z - i->z);
+                sumX = (j->x - i->x)/r;
+                sumY = (j->y - i->y)/r;
+                sumZ = (j->z - i->z)/r;
                 i->dxA += sumX;
                 i->dyA += sumY;
                 i->dzA += sumZ;
@@ -115,9 +212,7 @@ void TParticleNet::RunByStep(){
                 j->dzA -= sumZ;
             }
             else { // otherwise
-                r = pow(i->x - j->x,2) + pow(i->y - j->y,2) + pow(i->z - j->z,2);
-                r = sqrt(r);
-                dist = exp(-gamma*r)*beta;
+                dist = exp(-r);
                 sumX = dist*(j->x - i->x)/r;
                 sumY = dist*(j->y - i->y)/r;
                 sumZ = dist*(j->z - i->z)/r;
@@ -133,40 +228,24 @@ void TParticleNet::RunByStep(){
     
     for (i = Particles.begin() ; i != Particles.end(); ++i){
         if (i->degree != 0){
-            i->x += (eta*(i->dxA - i->dxR)) / i->degree;
-            i->y += (eta*(i->dyA - i->dyR)) / i->degree;
-            i->z += (eta*(i->dzA - i->dzR)) / i->degree;
-//            i->x += (eta*(i->dxA - i->dxR));
-//            i->y += (eta*(i->dyA - i->dyR));
-//            i->z += (eta*(i->dzA - i->dzR));
+            i->x += ((alpha*i->dxA - beta*i->dxR)) / (float)i->degree;
+            i->y += ((alpha*i->dyA - beta*i->dyR)) / (float)i->degree;
+            i->z += ((alpha*i->dzA - beta*i->dzR)) / (float)i->degree;
         }
     }
-    
+    if (detect) CommunityDetection();
 }
 
-int TParticleNet::RunModel(){
+int TParticleNet::RunModel(int maxIT, float minDR, bool verbose){
     float sumX, sumY, sumZ, r, dist;
     vector<TParticle>::iterator i,j;
     TUNGraph::TNodeI nodeIt;
-    float R, oldR;
+//    float oldRR, oldRR2, RR=0, oldACC, deltaOld=0.0;
     int steps=0;
+    float value;
     
     do {
-//        assignCentroids();
-//        if (toAddCentroid || toRemoveCentroid){
-//            if (toRemoveCentroid) {
-//                removeCentroid();
-//                				cout << "R" << endl;
-//            }
-//            if (toAddCentroid) {
-//                addCentroid();
-//                				cout << "A" << endl;
-//            }
-//            assignCentroids();
-//            //			mergeCentroids();
-//        }
-//        computeCentroids();
-
+        
         for (i = Particles.begin() ; i != Particles.end(); ++i){
             i->dxA = 0.0;
             i->dyA = 0.0;
@@ -175,14 +254,17 @@ int TParticleNet::RunModel(){
             i->dyR = 0.0;
             i->dzR = 0.0;
         }
-        
+        // Algorithm CORE (O(n^2))
         for (i = Particles.begin() ; i != Particles.end()-1; ++i){
             nodeIt = Network->GetNI(i->node_id);
             for (j = i+1 ; j != Particles.end(); ++j){
+                r = pow(i->x - j->x,2) + pow(i->y - j->y,2) + pow(i->z - j->z,2);
+                r = sqrt(r);
+                if (r==0) r = 0.0001;
                 if (nodeIt.IsNbrNId(j->node_id)) { // i and j are connected
-                    sumX = alpha*(j->x - i->x);
-                    sumY = alpha*(j->y - i->y);
-                    sumZ = alpha*(j->z - i->z);
+                    sumX = (j->x - i->x)/r;
+                    sumY = (j->y - i->y)/r;
+                    sumZ = (j->z - i->z)/r;
                     i->dxA += sumX;
                     i->dyA += sumY;
                     i->dzA += sumZ;
@@ -190,12 +272,9 @@ int TParticleNet::RunModel(){
                     j->dyA -= sumY;
                     j->dzA -= sumZ;
                 }
-                else { // otherwise
-                    r = pow(i->x - j->x,2) + pow(i->y - j->y,2) + pow(i->z - j->z,2);
-                    r = sqrt(r);
-                    dist = exp(-gamma*r)*beta;
+                else { // otherwise -> Most of the computation time is wasted in this part (repulsion)
+                    dist = exp(-r);
                     sumX = dist*(j->x - i->x)/r;
-//cout << fabs(i->x) << endl;
                     sumY = dist*(j->y - i->y)/r;
                     sumZ = dist*(j->z - i->z)/r;
                     i->dxR += sumX;
@@ -208,27 +287,33 @@ int TParticleNet::RunModel(){
             }
         }
         
-        oldR = R;
-        R=0.0;
+//        oldACC = accError;
+        oldRR2 = oldRR;
+        oldRR = RR;
+        RR = 0.0;
         for (i = Particles.begin() ; i != Particles.end(); ++i){
             if (i->degree != 0){
-                i->x += (eta*(i->dxA - i->dxR)) / i->degree;
-                i->y += (eta*(i->dyA - i->dyR)) / i->degree;
-                i->z += (eta*(i->dzA - i->dzR)) / i->degree;
-//                i->x += (eta*(i->dxA - i->dxR));
-//                i->y += (eta*(i->dyA - i->dyR));
-//                i->z += (eta*(i->dzA - i->dzR));
-
-                R += fabs(i->dxR) + fabs(i->dyR) + fabs(i->dzR);
-//                cout << fabs(i->dxR) << endl;
+                sumX = ((alpha*i->dxA - beta*i->dxR)) / (float)i->degree;
+                sumY = ((alpha*i->dyA - beta*i->dyR)) / (float)i->degree;
+                sumZ = ((alpha*i->dzA - beta*i->dzR)) / (float)i->degree;
+                i->x += sumX;
+                i->y += sumY;
+                i->z += sumZ;
+                RR += (fabs(i->dxR) + fabs(i->dyR) + fabs(i->dzR)) / (float)i->degree;
             }
         }
+        
+        RR = RR*0.1 + oldRR*0.9;
         ++steps;
-        cout << "Repulsao: " << R << " Diferenca: " << fabs(R-oldR) << endl;
-    } while (fabs(R - oldR) > 1.0);
-
+        
+        
+        value = fabs(oldRR2-RR); // / (float)Particles.size();
+        if (verbose) cout << steps << " " << RR << " " << value << endl;
+    } while (steps<maxIT && value > minDR);
+    
     return steps;
 }
+
 
 
 void TParticleNet::assignCentroids(){
@@ -240,9 +325,8 @@ void TParticleNet::assignCentroids(){
         c->error = 0.0;
         c->nparticles = 0;
     }
-    
+    accError = 0.0;
 
-    
     for (p=Particles.begin() ; p!=Particles.end(); ++p){
         c = Centroids.begin();
         dist = pow(p->x - c->x,2) + pow(p->y - c->y,2) + pow(p->z - c->z,2);
@@ -256,33 +340,46 @@ void TParticleNet::assignCentroids(){
             }
             ++c;
         }
-        p->index = c_assigned->comm_id;
+
+        p->index = &(*c_assigned); //->comm_id;
         c_assigned->error += dist;
+//        accError2 += pow(dist,2);
+//        accError += dist;
         c_assigned->nparticles++;
         if (dist > maxError) {
-            idCentroidMaxError = c_assigned - Centroids.begin(); // particle's index in the vector
+            idCentroidMaxError = c_assigned - Centroids.begin(); // Centroid's index associated to the farthest particle. When needed, the new centroid is added nearby this one.
             maxError = dist;
         }
     }
-
-    addCentroidThreshold = 0.5;
     
-    toAddCentroid = false;
-    toRemoveCentroid = false;
-    for (c=Centroids.begin() ; c!=Centroids.end() ; ++c){
-        if (c->nparticles) c->error /= c->nparticles;
-        if (c->error == 0.0) {
-            toRemoveCentroid = true;
-            centroid2remove = c - Centroids.begin(); // centroid's index in the vector
-        }
-        else if (c->error > addCentroidThreshold){
-            toAddCentroid = true;
-//            if (c->error < 2.0*thresholdToAdd) idCentroidMaxError = c - Centroids.begin();
-//            // if the centroid error is small, it means that a group of particles is dividing
-//            // otherwise, it represents a group without a previsous assigned centroid.
-//            // Whether the group is dividing, the new centroid must be add inside this group.
-        }
+    for (c=Centroids.begin() ; c!=Centroids.end(); ++c){
+        accError += c->error;
     }
+    
+    
+//    cout << "ID Centroid: " << idCentroidMaxError << endl;
+//    for (c=Centroids.begin() ; c!=Centroids.end(); ++c){
+//        cout << c - Centroids.begin() << " Error: " << c->error << " #C: " << c->nparticles << endl;;
+//    }
+
+    
+//    if (centroidTransient<=0) {
+        toAddCentroid = false;
+        toRemoveCentroid = false;
+        for (c=Centroids.begin() ; c!=Centroids.end() ; ++c){
+            if (c->nparticles) c->error /= c->nparticles;
+            if (c->error == 0.0) {
+                toRemoveCentroid = true;
+//                cout << "R";
+                centroid2remove = c - Centroids.begin(); // centroid's index in the vector
+            }
+            else if (c->error > addCentroidThreshold){
+                toAddCentroid = true;
+//                cout << "A";
+            }
+        }
+//        cout << endl << endl;
+//    }
 }
 
 void TParticleNet::computeCentroids(){
@@ -296,7 +393,7 @@ void TParticleNet::computeCentroids(){
         c->nparticles = 0;
         
         for (p=Particles.begin() ; p!=Particles.end() ; ++p){
-            if (p->index == c->comm_id){
+            if (p->index == &(*c)){ //->comm_id){
                 c->x += p->x;
                 c->y += p->y;
                 c->z += p->z;
@@ -309,6 +406,7 @@ void TParticleNet::computeCentroids(){
             c->z /= (float) c->nparticles;
         }
         else {
+//            cout << "D";
             c->x = 0.0;
             c->y = 0.0;
             c->z = 0.0;
@@ -319,85 +417,747 @@ void TParticleNet::computeCentroids(){
                
 void TParticleNet::addCentroid(){
     TCentroid centroid;
+    vector<int>::iterator i;
+
     
-    centroid.x = Centroids[idCentroidMaxError].x + (float)(rand()%100) / 100.0;
-    centroid.y = Centroids[idCentroidMaxError].y + (float)(rand()%100) / 100.0;
-    centroid.z = Centroids[idCentroidMaxError].z + (float)(rand()%100) / 100.0;
+    centroid.x = Centroids[idCentroidMaxError].x + (float)(rand()%10) / 100.0;
+    centroid.y = Centroids[idCentroidMaxError].y + (float)(rand()%10) / 100.0;
+    centroid.z = Centroids[idCentroidMaxError].z + (float)(rand()%10) / 100.0;
+    
     centroid.comm_id = nextComId++;
+    numCommunities++;
     
     Centroids.push_back(centroid);
     toAddCentroid = false;
+//    cout << "A";
 }
 
 void TParticleNet::removeCentroid(){
     Centroids.erase(Centroids.begin()+centroid2remove);
     toRemoveCentroid = false;
+    numCommunities--;
+//    cout << "R";
+}
+
+void TParticleNet::mergeCentroids(){
+    vector<TCentroid>::iterator c1,c2,c_remove;
+    float min=99999, dist;
+
+    for (c1=Centroids.begin() ; c1!=(Centroids.end()-1) ; ++c1){
+        for (c2=c1+1 ; c2!=(Centroids.end()) ; ++c2){
+            dist = pow(c1->x - c2->x, 2) + pow(c1->y - c2->y,2) + pow(c1->z - c2->z,2);
+            if (dist < min){
+                min = dist;
+                c_remove = c1;
+            }
+//            dist = pow(dist, 0.5);
+//            if (dist < 0.9) {
+//                
+//            }
+        }
+    }
+    if (sqrt(min)<0.9) {
+//        cout << "M";
+        Centroids.erase(c_remove);
+        numCommunities--;
+    }
+}
+
+int TParticleNet::CommunityDetection3(){
+    
+    vector<TCentroid>::iterator c;
+    vector<TParticle>::iterator p;
+    float oldAcc;
+    float diffError;
+    int steps=0;
+    
+    toAddCentroid = false;
+    toRemoveCentroid = false;
+    
+//    accError = 9999999;
+    
+    do {
+        oldAcc = accError;
+        mergeCentroids();
+        assignCentroids();
+        if (toAddCentroid || toRemoveCentroid){
+            centroidTransient = 0;
+            if (toRemoveCentroid) removeCentroid();
+            if (toAddCentroid) addCentroid();
+            assignCentroids();
+        }
+        computeCentroids();
+        accError = accError*0.1 + oldAcc*0.9;
+        diffError = fabs(oldAcc - accError); // / (float)Centroids.size();
+        ++steps;
+//        cout << beta << " " << accError << " " << diffError << " " << Centroids.size() << " " << NMI() << endl;
+    } while (diffError>0.01);
+//    cout << beta << " " << accError << " " << diffError << " " << Centroids.size() << " " << NMI() << endl;
+//    cout << "Steps Centroids: " << steps << endl;
+    return steps;
 }
 
 
 void TParticleNet::CommunityDetection(){
 
     vector<TCentroid>::iterator c;
+    vector<TParticle>::iterator p;
 
     toAddCentroid = false;
     toRemoveCentroid = false;
     
-    //    mergeCentroids();
-    do {
+    
+//    do {
+        mergeCentroids();
+//        cout << "1Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
         assignCentroids();
+//        cout << "2Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
+//        centroidTransient--;
         if (toAddCentroid || toRemoveCentroid){
+            centroidTransient = 0;
             if (toRemoveCentroid) {
                 removeCentroid();
+//                toRemoveCentroid = false;
             }
             if (toAddCentroid) {
                 addCentroid();
             }
+//            cout << "  3Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
             assignCentroids();
+//            cout << "  4Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
         }
         computeCentroids();
-        cout << "Number of Seeds: " << Centroids.size() << endl;
+//        cout << "Number of Seeds: " << Centroids.size() << " Max: " << nextComId << endl;
         
-        
-        for (c=Centroids.begin() ; c!=Centroids.end() ; ++c){
-            cout << "Centroid: " << c - Centroids.begin() << " " << c->x << " " << c->y << " " << c->z << endl;
+//    } while (toAddCentroid || toRemoveCentroid || centroidTransient>=0);
+
+    for (c=Centroids.begin() ; c!=Centroids.end() ; ++c){
+//        cout << c->comm_id << ":" << c->nparticles <<  " ";
+        c->totalA = c->totalR = 0.0;
+        for (p=Particles.begin() ; p!=Particles.end(); ++p){
+            if (&(*c) == p->index){
+                c->totalA += fabs(p->dxA) + fabs(p->dyA) + fabs(p->dzA);
+                c->totalR += fabs(p->dxR) + fabs(p->dyR) + fabs(p->dzR);
+//                c->totalG += fabs(p->dxR) + fabs(p->dyR) + fabs(p->dzR);
+            }
         }
-        
-    } while (toAddCentroid || toRemoveCentroid);
+    }
+//    cout << endl;
+    
 }
 
 bool myfunction (TParticle i, TParticle j) { return (i.node_id<j.node_id); }
 
+void TParticleNet::SaveCentroids(const char *filename){
+    ofstream file;
+        
+    vector<TCentroid>::iterator i;
 
+    int aux;
+    for (aux=1, i=Centroids.begin() ; i!=Centroids.end(); ++i, aux++){
+        i->comm_id = aux;
+    }
+    
+    file.open(filename, ofstream::out);
+    file << "% id_centroids; position; # of associated particles; total repulsion; total attraction; sum of dists " << endl;
+    for (i = Centroids.begin() ; i != Centroids.end(); ++i){
+        file << i->x << "\t"
+             << i->y << "\t"
+             << i->z << "\t"
+             << (int) i->comm_id << "\t"
+             << i->nparticles << "\t"
+             << i->totalR << "\t"
+             << i->totalA << "\t"
+             << i->error << endl;
+    }
+    file.close();
+}
+
+    
 void TParticleNet::SaveCommunities(const char *filename){
     ofstream file;
-
+    
+    int aux;
+    vector<TCentroid>::iterator c;
+    for (aux=1, c=Centroids.begin() ; c!=Centroids.end(); ++c, aux++){
+        c->comm_id = aux;
+    }
     sort (Particles.begin(), Particles.end(), myfunction);
     
     vector<TParticle>::iterator i;
     
     file.open(filename, ofstream::out);
     for (i = Particles.begin() ; i != Particles.end(); ++i){
-        file << i->index << "\t" << i->node_id << endl;
+//        file << i->index << "\t" << i->node_id << endl;
+        file << i->node_id <<  "\t" << i->index->comm_id << endl;
     }
     file.close();
-    
 }
+
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+
 
 float TParticleNet::NMI(){
     
+    int i,j;
+    int **labelCount;
+    int *numCount, *sumI, *sumJ;
+    float precision, Si=0,Sj=0;
+    int p, valor, comUser;
+    int N, numCentroids;
+    
+    
+    if (Centroids.size()<=1) return 0;
+    
+    vector<TCentroid>::iterator c;
+    vector<TParticle>::iterator part;
+    for (i=0, c=Centroids.begin() ; c!=Centroids.end(); ++c, i++){
+        c->comm_id = i;
+    }
+    
+//    	cout << "Com: " << numCommunities << endl;
+//    	cout << "Cen: " << numCentroids << endl;
+    
+    numCentroids = Centroids.size();
+    N = Particles.size();
+    
+    if (numCentroids > numCommunities) comUser = numCentroids;
+    else comUser = numCommunities;
+    
+    labelCount = new int*[comUser];
+    sumI = new int[comUser];
+    sumJ = new int[comUser];
+    for (i=0 ; i<comUser ; i++){
+        sumI[i] = sumJ[i] = 0.0;
+        labelCount[i] = new int[comUser];
+        for (j=0 ; j<comUser ; j++){
+            labelCount[i][j] = 0;
+        }
+    }
+    
+    for (part = Particles.begin() ; part != Particles.end() ; ++part){
+        labelCount[part->index->comm_id][part->indexReal-1]++;
+    }
+
+    
+    // sorting by rows
+    for (j=0 ; j<comUser-1 ; j++){
+        p = j;
+        valor = labelCount[j][j];
+        for (i=j+1 ; i<comUser ; i++){
+            if (labelCount[i][j] > valor){
+                p = i;
+                valor = labelCount[i][j];
+            }
+        }
+        if (p!=j) {
+            numCount = labelCount[j];
+            labelCount[j] = labelCount[p];
+            labelCount[p] = numCount;
+        }
+    }
+    
+    // sorting by columns
+    for (j=0 ; j<comUser-1 ; j++){
+        p = j;
+        valor = labelCount[j][j];
+        for (i=j+1 ; i<comUser ; i++){
+            if (labelCount[j][i] > valor){
+                p = i;
+                valor = labelCount[j][i];
+            }
+        }
+        if (p!=j) {
+            for (i=0 ; i<comUser ; i++){
+                valor = labelCount[i][j];
+                labelCount[i][j] = labelCount[i][p];
+                labelCount[i][p] = valor;
+            }
+        }
+    }
+    
+
+//    cout << "Matrix:\n";
+    for (j=0 ; j<comUser ; j++){
+        for (i=0 ; i<comUser ; i++){
+            sumJ[j] += labelCount[j][i];
+            sumI[i] += labelCount[j][i];
+//            cout << labelCount[j][i] << "\t";
+        }
+//        cout << ";" << endl;
+    }
+
+    comUser = numCommunities;
+    
+    precision = 0.0;
+    Si = 0.0;
+    Sj = 0.0;
+    int pNormal=0;
+    for (i=0 ; i<comUser ; i++){
+        pNormal += labelCount[i][i];
+        for (j=0 ; j<comUser ; j++){
+            if (labelCount[j][i]){
+                precision += (float)labelCount[j][i] * log( (float)(labelCount[j][i]*N)  /  (float)(sumI[i]*sumJ[j]) );
+            }
+        }
+        if (sumI[i]) Si += (float)sumI[i]*log((float)sumI[i]/(float)N);
+        if (sumJ[i]) Sj += (float)sumJ[i]*log((float)sumJ[i]/(float)N);
+    }
+    
+    precision *= -2;
+    precision /= (Si+Sj);
+    
+//    for (i=0 ; i<comUser ; i++)
+//        delete[] labelCount[i];
+//    delete[] labelCount;
+//    delete[] sumI;
+//    delete[] sumJ;
+    
+    return precision;
 }
+
+float TParticleNet::NMI2(){
+    vector<TParticle>::iterator part;
+    int i,j;
+    int **labelCount;
+    int *numCount, *sumI, *sumJ;
+    float precision, Si=0,Sj=0;
+    int p, valor, comUser;
+    int N;
+    
+    if (!numClusters) return 0;
+    
+//    numClusters--;
+    
+    N = Particles.size();
+
+    if (numClusters > numCommunities) comUser = numClusters;
+    else comUser = numCommunities;
+    
+//    cout << "#Clusters: " << numClusters << endl;
+
+    labelCount = new int*[comUser];
+    sumI = new int[comUser];
+    sumJ = new int[comUser];
+    for (i=0 ; i<comUser ; i++){
+        sumI[i] = sumJ[i] = 0.0;
+        labelCount[i] = new int[comUser];
+        for (j=0 ; j<comUser ; j++){
+            labelCount[i][j] = 0;
+        }
+    }
+
+//    cout << "#Clusters: " << numClusters << endl;
+    
+    
+    for (part = Particles.begin() ; part != Particles.end() ; ++part){
+//        cout << part->node_id << " -> " << part->cluster_id << endl;
+//        labelCount[part->cluster_id-1][part->indexReal-1]++;
+        labelCount[part->cluster_id][part->indexReal-1]++;
+    }
+    
+    
+    // sorting by rows
+    for (j=0 ; j<comUser-1 ; j++){
+        p = j;
+        valor = labelCount[j][j];
+        for (i=j+1 ; i<comUser ; i++){
+            if (labelCount[i][j] > valor){
+                p = i;
+                valor = labelCount[i][j];
+            }
+        }
+        if (p!=j) {
+            numCount = labelCount[j];
+            labelCount[j] = labelCount[p];
+            labelCount[p] = numCount;
+        }
+    }
+    
+    // sorting by columns
+    for (j=0 ; j<comUser-1 ; j++){
+        p = j;
+        valor = labelCount[j][j];
+        for (i=j+1 ; i<comUser ; i++){
+            if (labelCount[j][i] > valor){
+                p = i;
+                valor = labelCount[j][i];
+            }
+        }
+        if (p!=j) {
+            for (i=0 ; i<comUser ; i++){
+                valor = labelCount[i][j];
+                labelCount[i][j] = labelCount[i][p];
+                labelCount[i][p] = valor;
+            }
+        }
+    }
+    
+    
+//    cout << "Matrix:\n";
+    for (j=0 ; j<comUser ; j++){
+        for (i=0 ; i<comUser ; i++){
+            sumJ[j] += labelCount[j][i];
+            sumI[i] += labelCount[j][i];
+//            cout << labelCount[j][i] << "\t";
+        }
+//        cout << ";" << endl;
+    }
+    
+    comUser = numCommunities;
+    
+    precision = 0.0;
+    Si = 0.0;
+    Sj = 0.0;
+    int pNormal=0;
+    for (i=0 ; i<comUser ; i++){
+        pNormal += labelCount[i][i];
+        for (j=0 ; j<comUser ; j++){
+            if (labelCount[j][i]){
+                precision += (float)labelCount[j][i] * log( (float)(labelCount[j][i]*N)  /  (float)(sumI[i]*sumJ[j]) );
+            }
+        }
+        if (sumI[i]) Si += (float)sumI[i]*log((float)sumI[i]/(float)N);
+        if (sumJ[i]) Sj += (float)sumJ[i]*log((float)sumJ[i]/(float)N);
+    }
+    
+    precision *= -2;
+    precision /= (Si+Sj);
+    
+    //    for (i=0 ; i<comUser ; i++)
+    //        delete[] labelCount[i];
+    //    delete[] labelCount;
+    //    delete[] sumI;
+    //    delete[] sumJ;
+    
+    return precision;
+}
+
+float TParticleNet::NMIH(int nivel){
+    
+    int i,j;
+    int **labelCount;
+    int *numCount, *sumI, *sumJ;
+    float precision, Si=0,Sj=0;
+    int p, valor, comUser;
+    int N, numCentroids;
+    
+    
+    ShrinkCentroids();
+    
+    if (Centroids.size()<=1) return 0;
+    
+    vector<TCentroid>::iterator c;
+    vector<TParticle>::iterator part;
+    for (i=0, c=Centroids.begin() ; c!=Centroids.end(); ++c, i++){
+        c->comm_id = i;
+    }
+    
+    //    	cout << "Com: " << numCommunities << endl;
+    //    	cout << "Cen: " << numCentroids << endl;
+    
+    numCentroids = Centroids.size();
+    N = Particles.size();
+    
+    numCommunities = numCommunitiesH[nivel];
+    
+//    cout << "\n\n# Com: " << numCommunities << endl;
+    
+    if (numCentroids > numCommunities) comUser = numCentroids;
+    else comUser = numCommunities;
+    
+    labelCount = new int*[comUser];
+    sumI = new int[comUser];
+    sumJ = new int[comUser];
+    for (i=0 ; i<comUser ; i++){
+        sumI[i] = sumJ[i] = 0.0;
+        labelCount[i] = new int[comUser];
+        for (j=0 ; j<comUser ; j++){
+            labelCount[i][j] = 0;
+        }
+    }
+    
+    for (part = Particles.begin() ; part != Particles.end() ; ++part){
+        labelCount[part->index->comm_id][part->indexRealH[nivel]-1]++;
+//        cout << "Par: " << part->node_id << " com ac: " << part->index->comm_id << " com re: " << part->indexRealH[nivel] << endl;
+    }
+    
+    
+    // sorting by rows
+    for (j=0 ; j<comUser-1 ; j++){
+        p = j;
+        valor = labelCount[j][j];
+        for (i=j+1 ; i<comUser ; i++){
+            if (labelCount[i][j] > valor){
+                p = i;
+                valor = labelCount[i][j];
+            }
+        }
+        if (p!=j) {
+            numCount = labelCount[j];
+            labelCount[j] = labelCount[p];
+            labelCount[p] = numCount;
+        }
+    }
+    
+    // sorting by columns
+    for (j=0 ; j<comUser-1 ; j++){
+        p = j;
+        valor = labelCount[j][j];
+        for (i=j+1 ; i<comUser ; i++){
+            if (labelCount[j][i] > valor){
+                p = i;
+                valor = labelCount[j][i];
+            }
+        }
+        if (p!=j) {
+            for (i=0 ; i<comUser ; i++){
+                valor = labelCount[i][j];
+                labelCount[i][j] = labelCount[i][p];
+                labelCount[i][p] = valor;
+            }
+        }
+    }
+    
+    
+//        cout << "Matrix:\n";
+    for (j=0 ; j<comUser ; j++){
+        for (i=0 ; i<comUser ; i++){
+            sumJ[j] += labelCount[j][i];
+            sumI[i] += labelCount[j][i];
+//                        cout << labelCount[j][i] << "\t";
+        }
+//                cout << ";" << endl;
+    }
+//    cout << endl;
+    
+    comUser = numCommunities;
+    
+    precision = 0.0;
+    Si = 0.0;
+    Sj = 0.0;
+    int pNormal=0;
+    for (i=0 ; i<comUser ; i++){
+        pNormal += labelCount[i][i];
+        for (j=0 ; j<comUser ; j++){
+            if (labelCount[j][i]){
+                precision += (float)labelCount[j][i] * log( (float)(labelCount[j][i]*N)  /  (float)(sumI[i]*sumJ[j]) );
+            }
+        }
+        if (sumI[i]) Si += (float)sumI[i]*log((float)sumI[i]/(float)N);
+        if (sumJ[i]) Sj += (float)sumJ[i]*log((float)sumJ[i]/(float)N);
+    }
+    
+    precision *= -2;
+    precision /= (Si+Sj);
+    
+    //    for (i=0 ; i<comUser ; i++)
+    //        delete[] labelCount[i];
+    //    delete[] labelCount;
+    //    delete[] sumI;
+    //    delete[] sumJ;
+    
+    return precision;
+}
+
+
+
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+
+
+// fixed << setprecision(2)
 
 void TParticleNet::SaveParticlePosition(const char *filename){
     ofstream file;
     vector<TParticle>::iterator i;
     
     file.open(filename, ofstream::out);
+    file << "% Particle's file -> a snapshot of the particle space\n";
+    file << "% Simulation Parameters -> alpha: " << alpha << " beta: " << beta << endl;
+    file << "% x, y, z, ground truth community id, assigned community id, node_id\n";
+
     for (i = Particles.begin() ; i != Particles.end(); ++i){
-        file << i->x << "\t" << i->y << "\t" << i->z << "\t" << i->index << "\t" << i->indexReal << endl;
+        if (i->index)
+            file << fixed << setprecision(2) <<
+                    i->x << "\t" << i->y << "\t" << i->z << "\t" <<
+                    i->indexReal << "\t" <<
+                    i->index->comm_id << "\t" <<
+//                    i->cluster_id << "\t" <<
+                    i->node_id << endl;
+        else
+            file << fixed << setprecision(2) <<
+                    i->x << "\t" << i->y << "\t" << i->z << "\t" <<
+                    i->indexReal << "\t" <<
+                    "-1" << "\t" <<
+//                    i->cluster_id << "\t" <<
+                    i->node_id << endl;
     }
     file.close();
 }
 
+int TParticleNet::getNumCommunities(){
+    return Centroids.size();
+}
+
+int TParticleNet::getNumParticles(){
+    return Particles.size();
+}
+
+void TParticleNet::fineTuning(int t){
+    int i;
+    for (i=0 ; i<t ; i++){
+        assignCentroids();
+        computeCentroids();
+    }
+}
+
+void TParticleNet::ShrinkCentroids(){
+    vector<TCentroid>::iterator i;
+    int aux;
+    for (aux=1, i=Centroids.begin() ; i!=Centroids.end(); ++i, aux++){
+        i->comm_id = aux;
+    }
+}
+
+void TParticleNet::printCentroids(){
+    vector<TCentroid>::iterator i;
+    float E=0.0, TR=0.0, TA=0.0;
+    
+    int aux;
+    for (aux=1, i=Centroids.begin() ; i!=Centroids.end(); ++i, aux++){
+        i->comm_id = aux;
+    }
+    
+    for (i = Centroids.begin() ; i != Centroids.end(); ++i){
+//        cout << "C: " << i->comm_id << " E: " << i->error << " A: " << i->totalA << " R: " << i->totalR << endl;
+        E += i->error;
+        TA += i->totalA;
+        TR += i->totalR;
+//        file << i->x << "\t"
+//        << i->y << "\t"
+//        << i->z << "\t"
+//        << (int) i->comm_id << "\t"
+//        << i->nparticles << "\t"
+//        << i->totalR << "\t"
+//        << i->totalA << "\t"
+//        << i->error << endl;
+    }
+//    file.close();
+    E /= Centroids.size();
+    TA /= Centroids.size();
+    TR /= Centroids.size();
+    cout << " " << E << " " << TA << " " << TR << endl;
+//    cout << " " << E << " " << Centroids.size() << endl;
+
+}
+
+float TParticleNet::printCentroidsError(){
+    return accError;
+}
 
 
+////////////////
+////////////////
+////////////////
+////////////////
+////////////////
+////////////////
+////////////////
+////////////////
+////////////////
+////////////////
+////////////////
 
+
+#define EPS 1.0
+#define MINPTS 4
+
+vector<TParticle*> TParticleNet::GetRegion(TParticle *p){
+    float dist;
+    vector<TParticle>::iterator n;
+    vector<TParticle*> region;
+    
+    for (n=Particles.begin() ; n!=Particles.end(); ++n){
+        if (&(*n)==p) continue;
+        dist = pow(n->x - p->x,2) + pow(n->y - p->y,2) + pow(n->z - p->z,2);
+        dist = sqrt(dist);
+        if (dist <= EPS) region.push_back(&(*n));
+//        cout << dist << "\t";
+    }
+    return region;
+}
+
+bool TParticleNet::ExpandCluster(TParticle *p, int clusterID){
+    
+    vector<TParticle*> seeds = GetRegion(p);
+    
+    if (seeds.size() < MINPTS)
+    {
+        p->cluster_id = -1;
+        return false;
+    }
+    else // all points in seeds are density reachable from point 'p'
+    {
+        p->cluster_id = clusterID;
+        for (int s=0; s<seeds.size(); s++) {
+            seeds[s]->cluster_id = clusterID;
+//            cout << " " << seeds[s]->node_id;
+        }
+        while (seeds.size() > 0)
+        {
+            TParticle* currentP = seeds.back();
+            seeds.pop_back();
+            vector<TParticle*> seeds2 = GetRegion(currentP);
+            if (seeds2.size() >= MINPTS)
+            {
+                for (int i=0; i<seeds2.size(); i++)
+                {
+                    TParticle* currentP2 = seeds2.back();
+                    if (currentP2->cluster_id == 0  || currentP2->cluster_id == -1)
+                    {
+                        if (currentP2->cluster_id == 0) seeds.push_back(currentP2);
+                        currentP2->cluster_id = clusterID;
+//                        cout << " " << currentP2->node_id;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+}
+
+void TParticleNet::CommunityDetection2(){
+    
+    vector<TParticle>::iterator i;
+    int clusterID=1;
+
+    for (i=Particles.begin() ; i!=Particles.end(); ++i){
+        i->cluster_id = 0;
+    }
+    for (i = Particles.begin() ; i != Particles.end(); ++i){
+//        cout << "Seed: " << i->node_id;
+        if (i->cluster_id == 0){
+            if (ExpandCluster(&(*i),clusterID)) clusterID++;
+        }
+//        cout << endl;
+    }
+    numClusters = clusterID;
+
+//    for (i=Particles.begin() ; i!=Particles.end(); ++i){
+//        cout << "Particle: " << i->cluster_id << endl;
+//    }
+    for (i=Particles.begin() ; i!=Particles.end(); ++i){
+        if (i->cluster_id == -1) i->cluster_id = 0;
+    }
+
+
+    
+}

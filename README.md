@@ -36,3 +36,9 @@ Instructions to run:
          This command will evaluate the network by varying beta from 0.1 to 0.8 with step 0.01. 
 
 
+3) Run on time-varying networks
+
+    a) To run with time-varying data, you must compile a file with the names of each network state (um file per line)
+         $ ./Particle -dynamic filename.dat [plus regular options....]
+
+

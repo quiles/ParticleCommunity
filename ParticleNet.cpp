@@ -80,7 +80,7 @@ void TParticleNet::ReloadNetwork(const char *filename){
             particle.indexReal = 0;
             particle.node_id = NI.GetId();
             particle.degree = NI.GetDeg();
-            particle.cluster_id = 0;
+            particle.cluster_id = 0; 
             Particles.push_back(particle);
 //            cout << "A new particle associated to node: " << particle.node_id << " was inserted\n";
             RefNodes.push_back(NI.GetId());

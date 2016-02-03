@@ -46,7 +46,7 @@ public:
 
 class TParticleNet {
 private:
-    PUNGraph Network;
+    PUNGraph Network; 
     vector <TCentroid> Centroids;
     vector <TParticle> Particles;
     vector <int> RefNodes;

@@ -38,7 +38,7 @@ Instructions to run:
 
 3) Run on time-varying networks
 
-    a) To run with time-varying data, you must compile a file with the names of each network state (um file per line)
+    a) To run with time-varying data, you must compile a file with the names of each network state (one file per line)
          $ ./Particle -dynamic filename.dat [plus regular options....]
 
 

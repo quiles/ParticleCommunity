@@ -306,7 +306,7 @@ int main(int argc,char *argv[]){
             }
         }
 //        cout << numCom << " beta " << beta << " alpha " << alpha << endl;
-        if (searchBeta) ModelSearchBeta_debug();
+        if (searchBeta) ModelSearchBeta();
         else if (dynamic) ModelDynamic();
         else Model0();
 

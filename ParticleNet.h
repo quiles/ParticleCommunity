@@ -31,7 +31,7 @@ public:
 class TParticle{
 public:
     int node_id;
-    TUNGraph::TNodeI node;
+//    TUNGraph::TNodeI node;
     float x, y, z;
     int degree;
 	float dxA, dyA, dzA;
@@ -49,7 +49,7 @@ private:
     PUNGraph Network;
     vector <TCentroid> Centroids;
     vector <TParticle> Particles;
-
+    vector <int> RefNodes;
     
     float alpha; // attraction strength
     float beta; // repulsion strength
@@ -57,7 +57,7 @@ private:
     float eta; // numerical integration step (delta T), constant at 1.0
     float addCentroidThreshold;
     float mergeCentroidThreshold;
-    int centroidTransient;
+//    int centroidTransient;
     
     int nextComId;
     int numCommunities;
@@ -70,7 +70,6 @@ private:
     int centroid2remove;
     int idCentroidMaxError; // store the id of the centroid with the largest error
     float accError;
-    int transient;
     float RR, oldRR, oldRR2;
     
     
@@ -94,24 +93,23 @@ public:
     // format: 1 -> LFR files
     //         2 -> SNAP files
     void LoadCommunities(const char *filename, int format);
-    void LoadCommunitiesH(const char *filename, int nivel);
 
     PUNGraph GetNetwork(){
         return Network;
     };
     void SetModelParameters(float a, float b, float g){
-        alpha=a; beta=b; gamma=g; eta=1.0; transient = 0;
+        alpha=a; beta=b; gamma=g; eta=1.0;
     };
     void SetDetectionParameters(float a, float m){
         addCentroidThreshold=a; mergeCentroidThreshold=m;
     };
     
-    void RunByStep(bool detect);
+    void RunByStep();
+    void RunForNewNodes(int steps);
+
     int RunModel(int maxIT, float minDR, bool verbose);
     
     void SaveParticlePosition(const char *filename);
-    void CommunityDetection();
-    void CommunityDetection_DEBUG();
     void SaveCommunities(const char *filename);
     void SaveCentroids(const char *filename);
     float NMI();
@@ -123,46 +121,15 @@ public:
     void printCentroids();
     float printCentroidsError();
     
-    void CommunityDetection2(); // DBScan Algorithm
-    int CommunityDetection3();
+    void ReloadNetwork(const char *filename);
+    void AddNode(int node_id);
+    void AddLink(int i, int j);
+    void DeleteNode(int node_id);
+    void DeleteLink(int i,int j);
     
-
-
+    void CommunityDetection2(); // DBScan Algorithm - under development....
+    int CommunityDetection3(); // current clustering approach
     
-//	int iteracao;
-//	int stepAddCentroid; // define o momento de inser��o de novos centroids
-//	int centroidToRemove;
-//	int countDown;
-//	float fATotal,fRTotal;
-//	int maxError; // armazena o indice do v�rtice com maior erro em rela��o ao centroid
-//	float accErrorCentroid; // armazena o erro m�dio acumulado de todos os centroids
-//
-//	int startCentroid; // inicio do c�lculo dos centroids
-//	int startCountDown;
-//	int startStepAdd;
-//	int startMinComSize;
-//
-//	bool calcCentroids();
-//	float detecta();
-//	void calcDegree();
-//	void resetCentroids();
-//	void addCentroids();
-//	void removeCentroids(int i);
-//	void mergeCentroids();
-
-//	void Reset();
-//
-//	int Run5(float eta, float at, float rep, float decai);
-//	int Run6(float eta, float at, float rep, float decai);
-//	int Run6L(float eta, float at, float rep, float decai, int it);
-//	void SavePosition(string fname);
-//	void SaveCentroids(string fname);
-//	void GetPrecisionMI(float &pMI, float &pP, const char *atributo);
-//	float GetFTotal();
-//	void GetNumC(int &numCom, int &numCen);
-//
-//	void SetParametersDetection(int ce, int cd, int sa, int cs);
-//	void SetThresholdToAdd(float threshold);
 };
 
 #endif /* PHASESEPARATION_H_ */

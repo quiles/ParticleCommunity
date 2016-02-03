@@ -28,7 +28,6 @@ TParticleNet::TParticleNet(const char *filename){
     centroid.x = 0.0;
     centroid.y = 0.0;
     centroid.z = 0.0;
-    centroidTransient = 0;
     addCentroidThreshold = 0.5;
     centroid.comm_id = 1;
     numCommunities = 1;
@@ -41,23 +40,113 @@ TParticleNet::TParticleNet(const char *filename){
     
     numClusters = 0;
 
-    for (TUNGraph::TNodeI NI = Network->BegNI(); NI < Network->EndNI(); NI++) {
+    for (TUNGraph::TNodeI NI = Network->BegNI() ; NI < Network->EndNI(); NI++) {
         particle.x = (float)(rand()%2000 - 1000) / 10000.0;
         particle.y = (float)(rand()%2000 - 1000) / 10000.0;
         particle.z = (float)(rand()%2000 - 1000) / 10000.0;
         particle.index = NULL;
         particle.indexReal = 0;
         particle.node_id = NI.GetId();
-        particle.node = NI;
+//        particle.node = NI;
         particle.degree = NI.GetDeg();
         particle.cluster_id = 0;
         Particles.push_back(particle);
+        RefNodes.push_back(NI.GetId());
     }
 
 }
 
 TParticleNet::~TParticleNet() {
 }
+
+void TParticleNet::ReloadNetwork(const char *filename){
+    TParticle particle;
+    vector<TParticle>::iterator it;
+    ifstream file;
+    
+    cout << " nodes: " << Network->GetNodes() << " # of particles: " << Particles.size() <<  endl;
+
+    //Still need to find a better and optimized way to update the network....
+    
+    Network = TSnap::LoadEdgeList<PUNGraph>(filename,0,1);
+
+    // Case 1: find new nodes to add the new particles
+    for (TUNGraph::TNodeI NI = Network->BegNI(); NI < Network->EndNI(); NI++) {
+        if (find(RefNodes.begin(), RefNodes.end(), NI.GetId()) == RefNodes.end()){
+            particle.x = (float)(rand()%2000 - 1000) / 10000.0;
+            particle.y = (float)(rand()%2000 - 1000) / 10000.0;
+            particle.z = (float)(rand()%2000 - 1000) / 10000.0;
+            particle.index = NULL;
+            particle.indexReal = 0;
+            particle.node_id = NI.GetId();
+            particle.degree = NI.GetDeg();
+            particle.cluster_id = 0;
+            Particles.push_back(particle);
+//            cout << "A new particle associated to node: " << particle.node_id << " was inserted\n";
+            RefNodes.push_back(NI.GetId());
+        }
+    }
+    
+    // Case 2: delete particles related to deleted nodes
+    for (it = Particles.begin() ; it != Particles.end(); ++it){
+        if (!Network->IsNode(it->node_id)){
+//            cout << "Particle associated to node: " << it->node_id << " was deleted\n";
+            RefNodes.erase(find(RefNodes.begin(), RefNodes.end(), it->node_id));
+            Particles.erase(it);
+        }
+    }
+}
+
+
+void TParticleNet::AddNode(int node_id){
+    TParticle particle;
+    Network->AddNode(node_id);
+    particle.x = (float)(rand()%2000 - 1000) / 10000.0;
+    particle.y = (float)(rand()%2000 - 1000) / 10000.0;
+    particle.z = (float)(rand()%2000 - 1000) / 10000.0;
+    particle.index = NULL;
+    particle.indexReal = 0;
+    particle.node_id = node_id;
+    particle.degree = 0;
+    particle.cluster_id = 0;
+    Particles.push_back(particle);
+}
+
+void TParticleNet::AddLink(int i, int j){
+    vector<TParticle>::iterator it;
+    if (Network->IsNode(i) && Network->IsNode(j)){
+        Network->AddEdge(i,j);
+        for (it = Particles.begin() ; it != Particles.end(); ++it){
+            if (it->node_id == i) it->degree++;
+            if (it->node_id == j) it->degree++;
+        }
+    }
+}
+
+void TParticleNet::DeleteNode(int node_id){
+    vector<TParticle>::iterator it;
+    if (Network->IsNode(node_id)) {
+        Network->DelNode(node_id);
+        for (it = Particles.begin() ; it != Particles.end(); ++it){
+            if (it->node_id == node_id){
+                Particles.erase(it);
+                return;
+            }
+        }
+    }
+}
+
+void TParticleNet::DeleteLink(int i, int j){
+    vector<TParticle>::iterator it;
+    if (Network->IsNode(i) && Network->IsNode(j)){
+        Network->DelEdge(i,j);
+        for (it = Particles.begin() ; it != Particles.end(); ++it){
+            if (it->node_id == i) it->degree--;
+            if (it->node_id == j) it->degree--;
+        }
+    }
+}
+
 
 void TParticleNet::ResetParticles() {
     TCentroid centroid;
@@ -66,7 +155,6 @@ void TParticleNet::ResetParticles() {
     Particles.clear();
     Centroids.clear();
     
-    transient = 0;
     
     for (TUNGraph::TNodeI NI = Network->BegNI(); NI < Network->EndNI(); NI++) {
         particle.x = (float)(rand()%2000 - 1000) / 10000.0;
@@ -75,7 +163,7 @@ void TParticleNet::ResetParticles() {
         particle.index = NULL;
         particle.indexReal = 0;
         particle.node_id = NI.GetId();
-        particle.node = NI;
+//        particle.node = NI;
         particle.degree = NI.GetDeg();
         Particles.push_back(particle);
     }
@@ -101,13 +189,14 @@ void TParticleNet::LoadCommunities(const char *filename, int format){
     numCommunities = 0;
     
     file.open(filename, ifstream::in);
+
     
     switch (format) {
         case 1: { // LFR
             int teste=0;
+            cout << "Loading Loading: " << file.is_open()<< endl;
             while (file >> node_id && file >> com){
                 for (it = Particles.begin() ; it != Particles.end() && it->node_id != node_id ; ++it);
-//                cout << node_id << " - " << com << endl;
                 it->indexReal = com;
                 teste++;
                 if (com > numCommunities) numCommunities = com;
@@ -121,7 +210,6 @@ void TParticleNet::LoadCommunities(const char *filename, int format){
                 while (ss >> node_id){
                     for (it = Particles.begin() ; it != Particles.end() && it->node_id != node_id ; ++it) {
                     }
-//                    cout << node_id << " - " << it->node_id << endl;
                     it->indexReal = com;
                     if (com > numCommunities) numCommunities = com;
                 }
@@ -130,59 +218,77 @@ void TParticleNet::LoadCommunities(const char *filename, int format){
         }; break;
     }
     
-//    for (it = Particles.begin() ; it != Particles.end() ; ++it) {
-////        cout << "Comunidade: " << *it->node_id << " #: " << *it->index->comm_id << endl;
-//        cout << " - " << it->indexReal;
-//    }
-//    cout << endl;
-    
     file.close();
 }
 
-void TParticleNet::LoadCommunitiesH(const char *filename, int nivel){
-/*
-    ifstream file;
-    string loadName;
-    string line;
-    stringstream ss;
-    int node_id;
-    int com;
-    vector<TParticle>::iterator it;
-    char out[256];
-    int i, numCom;;
+// still under development -> it aims to reduce the number of steps when new nodes are added.
+// Some iterations performed only on the new nodes can make the convergence quick...
+
+void TParticleNet::RunForNewNodes(int steps){
+    float sumX, sumY, sumZ, r, dist;
+    vector<TParticle>::iterator i,j;
+    TUNGraph::TNodeI nodeIt;
+    int s;
     
-    for (i=0 ; i<nivel ; i++){
-        sprintf(out,"_n%d.dat",i+1);
-        loadName = filename;
-        loadName += out;
-//        cout << "Arquivo: " << loadName << endl;
-        file.open(loadName, ifstream::in);
-        numCom = 0;
-        while (file >> node_id && file >> com){
-            for (it = Particles.begin() ; it != Particles.end() && it->node_id != node_id ; ++it);
-//            cout << node_id << " - " << com << endl;
-            it->indexRealH.push_back(com);
-            if (com > numCom) numCom = com;
+    
+    for (s=0 ; s<steps ; s++){
+        for (i = Particles.begin() ; i != Particles.end(); ++i){
+            i->dxA = 0.0;
+            i->dyA = 0.0;
+            i->dzA = 0.0;
+            i->dxR = 0.0;
+            i->dyR = 0.0;
+            i->dzR = 0.0;
         }
-        numCommunitiesH.push_back(numCom);
-        file.close();
-//        cout << "Num Com Lido: " << numCom << endl;
+        
+        for (i = Particles.begin() ; i != Particles.end()-1; ++i){
+            nodeIt = Network->GetNI(i->node_id);
+            for (j = i+1 ; j != Particles.end(); ++j){
+                r = pow(i->x - j->x,2) + pow(i->y - j->y,2) + pow(i->z - j->z,2);
+                r = sqrt(r);
+                if (r==0) r = 0.0001;
+                
+                if (nodeIt.IsNbrNId(j->node_id)) { // i and j are connected
+                    sumX = (j->x - i->x)/r;
+                    sumY = (j->y - i->y)/r;
+                    sumZ = (j->z - i->z)/r;
+                    i->dxA += sumX;
+                    i->dyA += sumY;
+                    i->dzA += sumZ;
+                    j->dxA -= sumX;
+                    j->dyA -= sumY;
+                    j->dzA -= sumZ;
+                }
+                else { // otherwise
+                    dist = exp(-r);
+                    sumX = dist*(j->x - i->x)/r;
+                    sumY = dist*(j->y - i->y)/r;
+                    sumZ = dist*(j->z - i->z)/r;
+                    i->dxR += sumX;
+                    i->dyR += sumY;
+                    i->dzR += sumZ;
+                    j->dxR -= sumX;
+                    j->dyR -= sumY;
+                    j->dzR -= sumZ;
+                }
+            }
+        }
+        
+        for (i = Particles.begin() ; i != Particles.end(); ++i){
+            if (i->degree != 0){
+                i->x += ((alpha*i->dxA - beta*i->dxR)) / (float)i->degree;
+                i->y += ((alpha*i->dyA - beta*i->dyR)) / (float)i->degree;
+                i->z += ((alpha*i->dzA - beta*i->dzR)) / (float)i->degree;
+            }
+        }
     }
-    
-//    for (it = Particles.begin() ; it != Particles.end() ; ++it) {
-//        cout << it->node_id << " - " << it->indexRealH[0] << " : " << it->indexRealH[1] << endl;
-//    }
-//    cout << endl;
-*/
 }
 
-
-void TParticleNet::RunByStep(bool detect){
+void TParticleNet::RunByStep(){
     float sumX, sumY, sumZ, r, dist;
     vector<TParticle>::iterator i,j;
     TUNGraph::TNodeI nodeIt;
     
-    ++transient;
     
     for (i = Particles.begin() ; i != Particles.end(); ++i){
         i->dxA = 0.0;
@@ -233,7 +339,6 @@ void TParticleNet::RunByStep(bool detect){
             i->z += ((alpha*i->dzA - beta*i->dzR)) / (float)i->degree;
         }
     }
-    if (detect) CommunityDetection();
 }
 
 int TParticleNet::RunModel(int maxIT, float minDR, bool verbose){
@@ -303,14 +408,12 @@ int TParticleNet::RunModel(int maxIT, float minDR, bool verbose){
             }
         }
         
-        RR = RR*0.1 + oldRR*0.9;
+        RR = RR*0.1 + oldRR*0.9; // used to make the evolution of RR more stable (due to the numerical integration step DT=1.0.
         ++steps;
-        
-        
+    
         value = fabs(oldRR2-RR); // / (float)Particles.size();
         if (verbose) cout << steps << " " << RR << " " << value << endl;
     } while (steps<maxIT && value > minDR);
-    
     return steps;
 }
 
@@ -356,30 +459,20 @@ void TParticleNet::assignCentroids(){
         accError += c->error;
     }
     
-    
-//    cout << "ID Centroid: " << idCentroidMaxError << endl;
-//    for (c=Centroids.begin() ; c!=Centroids.end(); ++c){
-//        cout << c - Centroids.begin() << " Error: " << c->error << " #C: " << c->nparticles << endl;;
-//    }
 
-    
-//    if (centroidTransient<=0) {
-        toAddCentroid = false;
-        toRemoveCentroid = false;
-        for (c=Centroids.begin() ; c!=Centroids.end() ; ++c){
-            if (c->nparticles) c->error /= c->nparticles;
-            if (c->error == 0.0) {
-                toRemoveCentroid = true;
-//                cout << "R";
-                centroid2remove = c - Centroids.begin(); // centroid's index in the vector
-            }
-            else if (c->error > addCentroidThreshold){
-                toAddCentroid = true;
-//                cout << "A";
-            }
+    toAddCentroid = false;
+    toRemoveCentroid = false;
+    for (c=Centroids.begin() ; c!=Centroids.end() ; ++c){
+        if (c->nparticles) c->error /= c->nparticles;
+        if (c->error == 0.0) {
+            toRemoveCentroid = true;
+            centroid2remove = c - Centroids.begin(); // centroid's index in the vector
         }
-//        cout << endl << endl;
-//    }
+        else if (c->error > addCentroidThreshold){
+            toAddCentroid = true;
+        }
+    }
+    
 }
 
 void TParticleNet::computeCentroids(){
@@ -474,77 +567,24 @@ int TParticleNet::CommunityDetection3(){
     toAddCentroid = false;
     toRemoveCentroid = false;
     
-//    accError = 9999999;
     
     do {
         oldAcc = accError;
         mergeCentroids();
         assignCentroids();
         if (toAddCentroid || toRemoveCentroid){
-            centroidTransient = 0;
             if (toRemoveCentroid) removeCentroid();
             if (toAddCentroid) addCentroid();
             assignCentroids();
         }
         computeCentroids();
-        accError = accError*0.1 + oldAcc*0.9;
+        accError = accError*0.1 + oldAcc*0.9; // used to make the evolution of the centroid error more stable...
         diffError = fabs(oldAcc - accError); // / (float)Centroids.size();
         ++steps;
-//        cout << beta << " " << accError << " " << diffError << " " << Centroids.size() << " " << NMI() << endl;
     } while (diffError>0.01);
-//    cout << beta << " " << accError << " " << diffError << " " << Centroids.size() << " " << NMI() << endl;
-//    cout << "Steps Centroids: " << steps << endl;
     return steps;
 }
 
-
-void TParticleNet::CommunityDetection(){
-
-    vector<TCentroid>::iterator c;
-    vector<TParticle>::iterator p;
-
-    toAddCentroid = false;
-    toRemoveCentroid = false;
-    
-    
-//    do {
-        mergeCentroids();
-//        cout << "1Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
-        assignCentroids();
-//        cout << "2Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
-//        centroidTransient--;
-        if (toAddCentroid || toRemoveCentroid){
-            centroidTransient = 0;
-            if (toRemoveCentroid) {
-                removeCentroid();
-//                toRemoveCentroid = false;
-            }
-            if (toAddCentroid) {
-                addCentroid();
-            }
-//            cout << "  3Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
-            assignCentroids();
-//            cout << "  4Beta: " << beta << " Status: " << toAddCentroid << " " << toRemoveCentroid << endl;
-        }
-        computeCentroids();
-//        cout << "Number of Seeds: " << Centroids.size() << " Max: " << nextComId << endl;
-        
-//    } while (toAddCentroid || toRemoveCentroid || centroidTransient>=0);
-
-    for (c=Centroids.begin() ; c!=Centroids.end() ; ++c){
-//        cout << c->comm_id << ":" << c->nparticles <<  " ";
-        c->totalA = c->totalR = 0.0;
-        for (p=Particles.begin() ; p!=Particles.end(); ++p){
-            if (&(*c) == p->index){
-                c->totalA += fabs(p->dxA) + fabs(p->dyA) + fabs(p->dzA);
-                c->totalR += fabs(p->dxR) + fabs(p->dyR) + fabs(p->dzR);
-//                c->totalG += fabs(p->dxR) + fabs(p->dyR) + fabs(p->dzR);
-            }
-        }
-    }
-//    cout << endl;
-    
-}
 
 bool myfunction (TParticle i, TParticle j) { return (i.node_id<j.node_id); }
 

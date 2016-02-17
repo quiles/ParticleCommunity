@@ -53,7 +53,6 @@ TParticleNet::TParticleNet(const char *filename){
         Particles.push_back(particle);
         RefNodes.push_back(NI.GetId());
     }
-
 }
 
 TParticleNet::~TParticleNet() {
@@ -63,14 +62,29 @@ void TParticleNet::ReloadNetwork(const char *filename){
     TParticle particle;
     vector<TParticle>::iterator it;
     ifstream file;
+    int oldNodes;
+    int oldPar;
     
-    cout << " nodes: " << Network->GetNodes() << " # of particles: " << Particles.size() <<  endl;
+    oldNodes = Network->GetNodes();
+    oldPar = Particles.size();
+
 
     //Still need to find a better and optimized way to update the network....
     
     Network = TSnap::LoadEdgeList<PUNGraph>(filename,0,1);
-
-    // Case 1: find new nodes to add the new particles
+    
+    // Case 1: delete particles related to deleted nodes
+    for (it = Particles.begin() ; it != Particles.end(); ++it){
+        if (!Network->IsNode(it->node_id)){
+            RefNodes.erase(find(RefNodes.begin(), RefNodes.end(), it->node_id));
+            Particles.erase(it);
+            it--;
+        }
+        
+    }
+    
+    
+    // Case 2: find new nodes to add the new particles
     for (TUNGraph::TNodeI NI = Network->BegNI(); NI < Network->EndNI(); NI++) {
         if (find(RefNodes.begin(), RefNodes.end(), NI.GetId()) == RefNodes.end()){
             particle.x = (float)(rand()%2000 - 1000) / 10000.0;
@@ -80,21 +94,14 @@ void TParticleNet::ReloadNetwork(const char *filename){
             particle.indexReal = 0;
             particle.node_id = NI.GetId();
             particle.degree = NI.GetDeg();
-            particle.cluster_id = 0; 
+            particle.cluster_id = 0;
             Particles.push_back(particle);
-//            cout << "A new particle associated to node: " << particle.node_id << " was inserted\n";
             RefNodes.push_back(NI.GetId());
         }
     }
     
-    // Case 2: delete particles related to deleted nodes
-    for (it = Particles.begin() ; it != Particles.end(); ++it){
-        if (!Network->IsNode(it->node_id)){
-//            cout << "Particle associated to node: " << it->node_id << " was deleted\n";
-            RefNodes.erase(find(RefNodes.begin(), RefNodes.end(), it->node_id));
-            Particles.erase(it);
-        }
-    }
+//    cout << " Net: " << Network->GetNodes() << " Particles: " << Particles.size() << endl;
+    
 }
 
 
@@ -348,6 +355,8 @@ int TParticleNet::RunModel(int maxIT, float minDR, bool verbose){
 //    float oldRR, oldRR2, RR=0, oldACC, deltaOld=0.0;
     int steps=0;
     float value;
+
+    if (verbose) cout << " Step#   \\theta_R   \\Delta\\theta_R \n";
     
     do {
         
